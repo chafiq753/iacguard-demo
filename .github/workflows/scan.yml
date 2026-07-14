@@ -1,0 +1,61 @@
+# =============================================================================
+#  iac-guard — Scan de sécurité IaC (version démo autonome)
+#
+#  Différence avec le template officiel : l'aggregator est embarqué dans ce
+#  repo (dossier pipeline/) au lieu d'être téléchargé depuis le repo iac-guard.
+#  Conftest est omis ici (il nécessite le bundle de policies publié).
+#
+#  Prérequis (Settings > Secrets and variables > Actions) :
+#    - Secret   IACGUARD_TOKEN   = le token du projet (iacg_...)
+#    - Variable IACGUARD_API_URL = URL publique de l'API (tunnel ou déploiement)
+# =============================================================================
+
+name: iac-guard scan
+
+on:
+  push:
+  workflow_dispatch:   # permet aussi de le lancer à la main depuis l'onglet Actions
+
+env:
+  GITLEAKS_VERSION: "8.21.2"
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout du repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # historique complet -> Gitleaks scanne aussi les commits
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 🔍 Gitleaks (secrets)
+        continue-on-error: true
+        run: |
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz -C /usr/local/bin gitleaks
+          gitleaks detect --source . \
+            --report-format json --report-path gitleaks.json \
+            --redact --exit-code 0
+
+      - name: 🔍 Checkov (mauvaises configurations)
+        continue-on-error: true
+        run: |
+          pip install checkov
+          checkov -d . -o json --soft-fail > checkov.json
+
+      - name: 🔄 Agréger et envoyer à iac-guard
+        run: |
+          pip install -r pipeline/requirements.txt
+          python pipeline/aggregator.py \
+            --gitleaks gitleaks.json \
+            --checkov  checkov.json \
+            --repo   "${GITHUB_REPOSITORY}" \
+            --branch "${GITHUB_REF_NAME}" \
+            --commit "${GITHUB_SHA}" \
+            --api-url "${{ vars.IACGUARD_API_URL }}" \
+            --token   "${{ secrets.IACGUARD_TOKEN }}"
