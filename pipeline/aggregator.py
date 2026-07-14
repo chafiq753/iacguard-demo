@@ -236,10 +236,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--token", help="Token API du projet")
     args = parser.parse_args(argv)
 
+    # Nettoie les espaces/retours à la ligne collés par erreur dans les
+    # secrets CI (un \r\n invisible suffit à casser la résolution DNS).
+    api_url = (args.api_url or "").strip()
+    token = (args.token or "").strip()
+
     report = build_report(args)
 
-    if args.api_url and args.token:
-        send_report(report, args.api_url, args.token)
+    if api_url and token:
+        send_report(report, api_url, token)
     else:
         print(json.dumps(report.model_dump(mode="json"), indent=2, ensure_ascii=False))
     return 0
